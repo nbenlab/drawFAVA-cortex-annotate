@@ -154,6 +154,19 @@ USER $NB_USER
 RUN /bin/bash /build/build_user.sh
 
 
+# Specifically because we are building for a DockerHub image ###################
+
+# The idea of the dockerhub image is that the user doesn't need to have all of
+# the data and configuration of this repository downloaded, and they can
+# instead just use a docker-compose.yml file that downloads the image.
+USER root
+COPY config/ /config/
+RUN chmod 644 /config/* \
+ && chmod 755 /build/build_root.sh \
+ && chmod 755 /build/build_user.sh
+USER $NB_USER
+
+
 # Permission Cleanup ###########################################################
 
 # We need to fix the permissions for anything created in the meantime.
