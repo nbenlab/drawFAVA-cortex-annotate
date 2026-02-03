@@ -642,6 +642,45 @@ class AnnotationState:
                 canvas.stroke_circle(x, y, ms)
         # That"s all!
 
+    def _calc_fixed_ends(self, annot, targ, error=False):
+        """Given an annotation name and a dict of annotations for a target, 
+        calculates the fixed head/tail and returns them as a tuple.
+        """
+        target = self.config.targets[targ]
+        targ_annots = self.annotations[targ]
+        annot_data = self.config.annotations[annot]
+        fs = []
+        for fixed in (annot_data.fixed_head, annot_data.fixed_tail):
+            if fixed is None:
+                fs.append(None)
+                continue
+            missing = []
+            found = {}
+            for r in fixed["requires"]:
+                xy = targ_annots.get(r, ())
+                if len(xy) == 0:
+                    missing.append(r)
+                else:
+                    found[r] = xy
+            if len(missing) == 0:
+                try:
+                    f = fixed["calculate"](target, found)
+                    fs.append(f)
+                except Exception as e:
+                    if error:
+                        error = f"Error generating fixed points:\n  {e}"
+                        raise ValueError(error) from None
+                    else:
+                        fs.append(None)
+                        continue
+            elif error:
+                annlist = ", ".join(missing)
+                raise ValueError(
+                    f"The following annotations are required:\n  {annlist}")
+            else:
+                fs.append(None)
+        return fs
+
 
 # The Annotation Tool ##########################################################
 
@@ -660,7 +699,8 @@ class AnnotationTool(ipw.HBox):
             git_path    = "/git",
             username    = None,
             control_panel_background_color = "#f0f0f0",
-            save_button_color = "#e0e0e0"
+            save_button_color = "#e0e0e0",
+            allow_fixed_edit = True
         ):        
         """Initializes the annotation tool."""
         
@@ -672,6 +712,7 @@ class AnnotationTool(ipw.HBox):
             git_path    = git_path,
             username    = username
         )
+        self.allow_fixed_edit = allow_fixed_edit
 
         # Store the cache path.
         self.cache_path = cache_path
@@ -723,6 +764,10 @@ class AnnotationTool(ipw.HBox):
         self.figure_panel.resize_canvas(change.new)
 
 
+    def _calc_fixed_ends(self, annot, targ=None, error=False):
+        targ = self.control_panel.target if targ is None else targ
+        return self.state._calc_fixed_ends(annot, targ=targ, error=error)
+
     def refresh_figure(self):
         targ  = self.control_panel.target
         annot = self.control_panel.annotation
@@ -740,46 +785,22 @@ class AnnotationTool(ipw.HBox):
                 if fixed is not None and annot in fixed["requires"]:
                     deps.append(annot_name)
                     break
-        if len(deps) > 0:
+        if not self.allow_fixed_edit and len(deps) > 0:
             fs = None
             annlist = ", ".join(deps)
             error = (
                 f"The following annotations are dependant on the annotation"
                 f" {annot}: {annlist}. Please select an annotation that does"
                 f" not depend on other existing annotations.")
-            fh = None
-            ft = None
         else:
             # Figure out the fixed heads and tails
-            annot_data = self.state.config.annotations[annot]
-            (fs, reqs) = ([], [])
-            for fixed in [annot_data.fixed_head, annot_data.fixed_tail]:
-                if fixed is not None:
-                    reqs += fixed["requires"]
-                fs.append(fixed)
-            missing = []
-            found = {}
-            for r in reqs:
-                xy = targ_annots.get(r, ())
-                if len(xy) == 0:
-                    missing.append(r)
-                else:
-                    found[r] = xy
-            if len(missing) == 0:
-                target = self.state.config.targets[targ]
-                try:
-                    fs = [(None if f is None else f["calculate"](target, found))
-                          for f in fs]
-                    error = None
-                except Exception as e:
-                    error = f"Error generating fixed points:\n  {e}"
-                    fs = None
-            else:
+            try:
+                fs = self._calc_fixed_ends(annot, targ=targ, error=True)
+                error = None
+            except ValueError as e:
                 fs = None
-                annlist = ", ".join(missing)
-                error = f"The following annotations are required:\n  {annlist}"
-            (fh,ft) = (None,None) if fs is None else fs
-
+                error = e.args[0]
+        (fh,ft) = (None, None) if fs is None else fs
         self.figure_panel.change_annotations(
             targ_annots,
             self.state.builtin_annotations[targ],
@@ -787,7 +808,8 @@ class AnnotationTool(ipw.HBox):
             annotation_types = self.state.config.annotation_types,
             allow = (fs is not None),
             fixed_heads = {annot: fh},
-            fixed_tails = {annot: ft}
+            fixed_tails = {annot: ft},
+            target=targ
         )
 
         self.figure_panel.change_foreground(annot, redraw = False)

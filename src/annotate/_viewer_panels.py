@@ -20,10 +20,10 @@ CortexViewer is implmented in _viewer.py.
 # Imports ----------------------------------------------------------------------
 
 import numpy as np
-import ipyvolume as ipv
+import k3d
 import neuropythy as ny
 import ipywidgets as ipw
-from matplotlib.colors import to_rgb
+from matplotlib.colors import to_rgb, to_rgba
 
 # The Cortex Control Panel  ----------------------------------------------------
 
@@ -309,7 +309,7 @@ class CortexControlPanel(ipw.VBox):
 
 # The Cortex Figure Panel ------------------------------------------------------
 
-class CortexFigurePanel(ipw.HBox):
+class CortexFigurePanel(ipw.GridBox):
     """Cortex Figure Panel.
 
     The panel that contains the 3D cortex plot for the Cortex Viewer tool.
@@ -318,41 +318,103 @@ class CortexFigurePanel(ipw.HBox):
     def __init__(
             self, 
             state, 
-            width     = 600, 
-            height    = 400, 
-            animation = 60, 
-            animation_exponent = 1
+            width  = None,
+            height = 400
         ):
         # Create a figure background
-        self.figure = ipv.figure(
-            width              = width, 
-            height             = height, 
-            animation          = animation, 
-            animation_exponent = animation_exponent
-        )
-                    
-        # Draw the cortex plot (meshes) onto the figure
-        self.figure = ny.cortex_plot(
-            mesh   = state.mesh, 
-            view   = "left" if state.hemisphere == "lh" else "right",
-            figure = self.figure, 
+        self.figure = k3d.plot(
+            #width   = width,  # K3d doesn't use width, just fills the space
+            height=height,
+            grid_visible=False,
+            camera_auto_fit=True,
+            camera_fov=1,
+            axes_helper=0,
+            menu_visibility=False,
         )
         
+        # Draw the cortex plot (meshes) onto the k3d plot
+        self.k3dmesh = k3d.mesh(
+            state.mesh.coordinates.T.astype(np.float32),
+            state.mesh.tess.indexed_faces.T.astype(np.uint32),
+            flat_shading=False,
+            wireframe=False,
+            colors=self._rgb_to_k3dcolor(
+                ny.graphics.cortex_plot_colors(state.mesh)))
+        self.figure += self.k3dmesh
+        #if state.hemisphere == 'lh':
+        #    self.figure.camera = [
+        #        4000.0, -9300.0, 800.0,
+        #        0, 0, 0,
+        #        0, 0, 1
+        #    ]
+        #else:
+        #    self.figure.camera = [
+        #        -4000.0, -9300.0, 800.0,
+        #        0, 0, 0,
+        #        0, 0, 1
+        #    ]
+        
         # Add scatter plots for annotations ( points and lines )
-        self.figure.scatters = [
-            # Active annotation points
-            self._init_active_scatter(state),
-            # Background annotation points
-            self._init_background_scatter(state),
-        ]
+        self.k3dpoints_active = self._init_active_scatter(state)
+        # Background annotation points
+        self.k3dpoints_background = self._init_background_scatter(state)
 
-        super().__init__([self.figure])
+        layout = ipw.Layout(
+            grid_template_columns='1fr',
+            height=f"{height}px",
+            width=("100%" if width is None else "{width}px"))
+        super().__init__([self.figure], layout=layout)
 
+    def _rgb_to_k3dcolor(self, color, nrows=None):
+        """Converts a matplorlib color into a color integer for k3d.
+
+        If the given color is a matrix of RGB or RGBA triples, then a list of
+        integers, one per row, is returned. If the given color is a list of
+        strings or colors, then each is converted.
+        """
+        if nrows is not None:
+            c = self._rgb_to_k3dcolor(color)
+            if isinstance(c, int):
+                return [c]*nrows
+            elif len(c) == nrows:
+                return c
+            raise ValueError(f"{nrows} rows requested but {len(c)} produced")
+        if isinstance(color, int):
+            return color
+        if isinstance(color, str):
+            return self._rgb_to_k3dcolor(to_rgb(color))
+        color = np.asarray(color)
+        if np.issubdtype(color.dtype, np.floating):
+            color = np.round(color * 255).astype(np.uint8)
+        elif np.issubdtype(color.dtype, np.str_):
+            return self._rgb_to_k3dcolor(list(map(to_rgb, color)))
+        elif not np.issubdtype(color.dtype, np.uint8):
+            raise ValueError("RGB arrays must be floating point or uint8")
+        if len(color.shape) == 2:
+            # Matrix of RGB or RGBA...
+            if color.shape[1] == 4:
+                if not np.all(color[:, -1] == 255):
+                    raise ValueError("k3dcolors cannot include transparency")
+                color = color[:, :3]
+            elif color.shape[1] != 3:
+                raise ValueError("color matrices must be N x 3 or N x 4")
+            color = color.T
+        elif len(color.shape) != 1:
+            raise ValueError("can only convert lists and matrices of rgb")
+        elif color.shape[0] != 3 and color.shape[0] != 4:
+            raise ValueError("rgb or rgba values are required")
+        (r,g,b) = color.astype(np.uint32)
+        return ((r << 16) | (g << 8) | b)
 
     def _init_scatter(self):
         """Initialize an empty scatter plot."""
-        return ipv.scatter(0, 0, 0, visible = False, marker = "sphere")
-    
+        #return ipv.scatter(0, 0, 0, visible = False, marker = "sphere")
+        return k3d.points(
+            positions=np.array([[0,0,0]], dtype=np.float32),
+            point_size=0.5,
+            shader='2d',
+            color=0x8888ff
+        )
 
     def _prep_active_scatter(self, state):
         """Prepare the data for the active annotation."""
@@ -431,49 +493,56 @@ class CortexFigurePanel(ipw.HBox):
         """Initialize the scatter plot for the active annotation."""
         scatter_kwargs = self._prep_active_scatter(state)
         if scatter_kwargs is None:
-            return self._init_scatter()
-        return ipv.scatter(**scatter_kwargs, marker = "sphere")
-
+            points = self._init_scatter()
+        else:
+            points = k3d.points(
+                np.transpose([scatter_kwargs[k] for k in ('x','y','z')]).astype(np.float32),
+                shader='2d',
+                point_size=float(scatter_kwargs['size']),
+                color=int(self._rgb_to_k3dcolor(scatter_kwargs['color'][0]))
+            )
+        self.figure += points
+        return points
 
     def _init_background_scatter(self, state):
         """Initialize the scatter plot for the background annotations."""
         scatter_kwargs = self._prep_background_scatter(state)
         if scatter_kwargs is None:
-            return self._init_scatter()
-        return ipv.scatter(**scatter_kwargs, marker = "sphere")
-
+            points = self._init_scatter()
+        else:
+            points = k3d.points(
+                np.transpose([scatter_kwargs[k] for k in ('x','y','z')]).astype(np.float32),
+                shader='2d',
+                point_size=float(scatter_kwargs['size']),
+                color=int(self._rgb_to_k3dcolor(scatter_kwargs['color'][0]))
+            )
+        self.figure += points
+        return points
 
     def refresh_figure(self, state):
         """Update the existing figure mesh coordinates and annotation points."""
         # Update the figure panel's mesh values
-        with self.figure.meshes[0].hold_sync():
-            self.figure.meshes[0].x     = state.coordinates[0, :]
-            self.figure.meshes[0].y     = state.coordinates[1, :]
-            self.figure.meshes[0].z     = state.coordinates[2, :]
-            self.figure.meshes[0].color = state.color
+        self.k3dmesh.vertices = state.coordinates.T.astype(np.float32)
+        self.k3dmesh.colors = self._rgb_to_k3dcolor(state.color)
         
         # Update the surface active annotation
         active_kwargs = self._prep_active_scatter(state)
         if active_kwargs is None:
-            self.figure.scatters[0].visible = False
-        else:    
-            with self.figure.scatters[0].hold_sync():
-                self.figure.scatters[0].x   = active_kwargs["x"]
-                self.figure.scatters[0].y   = active_kwargs["y"]
-                self.figure.scatters[0].z   = active_kwargs["z"]
-            self.figure.scatters[0].size    = active_kwargs["size"]
-            self.figure.scatters[0].color   = active_kwargs["color"]
-            self.figure.scatters[0].visible = True
+            self.k3dpoints_active.visible = False
+        else:
+            coords = np.transpose([active_kwargs[k] for k in ('x','y','z')])
+            self.k3dpoints_active.positions = coords.astype(np.float32)
+            self.k3dpoints_active.size = active_kwargs["size"]
+            self.k3dpoints_active.colors = self._rgb_to_k3dcolor(active_kwargs["color"], len(coords))
+            self.k3dpoints_active.visible = True
         
         # Update the surface background annotation
         background_kwargs = self._prep_background_scatter(state)
         if background_kwargs is None:
-            self.figure.scatters[1].visible = False
+            self.k3dpoints_background.visible = False
         else:
-            with self.figure.scatters[1].hold_sync():
-                self.figure.scatters[1].x   = background_kwargs["x"]
-                self.figure.scatters[1].y   = background_kwargs["y"]
-                self.figure.scatters[1].z   = background_kwargs["z"]
-            self.figure.scatters[1].size    = background_kwargs["size"]
-            self.figure.scatters[1].color   = background_kwargs["color"]
-            self.figure.scatters[1].visible = True   
+            coords = np.transpose([background_kwargs[k] for k in ('x','y','z')])
+            self.k3dpoints_background.positions = coords.astype(np.float32)
+            self.k3dpoints_background.size = background_kwargs["size"]
+            self.k3dpoints_background.colors = self._rgb_to_k3dcolor(background_kwargs["color"], len(coords))
+            self.k3dpoints_background.visible = True

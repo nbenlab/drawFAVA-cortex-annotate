@@ -391,14 +391,14 @@ class CortexViewerState:
 
 # The Cortex Viewer Widget -----------------------------------------------------
 
-class CortexViewer(ipw.HBox):
+class CortexViewer(ipw.GridBox):
     """The Cortex Viewer widget.
 
     The `CortexViewer` type handles the 3D Cortex figure that renders the 
     cortical mesh that assists the flatmap viewer.
     """
 
-    def __init__(self, annotation_widgets, dataset_directory):
+    def __init__(self, annotation_widgets, dataset_directory, panel_width=270):
         # Initialize the Cortex Viewer state
         self.state = CortexViewerState(
             annotation_widgets = annotation_widgets,
@@ -411,13 +411,15 @@ class CortexViewer(ipw.HBox):
         # Create the Cortex Viewer figure panel
         self.figure_panel = CortexFigurePanel(self.state)
 
-        # Initialize the HBox with the control panel and figure panel
+        # Initialize the GridBox with the control panel and figure panel
         super().__init__(
             children = [self.control_panel, self.figure_panel], 
-            layout   = { 
-                "border"  : "1px solid rgb(158, 158, 158)", 
-                "padding" : "15px"
-            }
+            layout   = ipw.Layout(
+                border="1px solid rgb(158, 158, 158)", 
+                padding="15px",
+                grid_template_columns=f'{panel_width}px 1fr',
+                grid_template_rows='auto'
+            )
         )
 
         # Assign information box observers

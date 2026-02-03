@@ -402,7 +402,8 @@ class FigurePanel(ipw.HBox):
     
     def change_annotations(
             self, annots, builtin_annots, redraw = True, allow = True,
-            fixed_heads = None, fixed_tails = None, annotation_types = None
+            fixed_heads = None, fixed_tails = None, annotation_types = None,
+            target = None
         ):
         """Changes the set of currently visible annotations.
 
@@ -418,6 +419,7 @@ class FigurePanel(ipw.HBox):
         self.fixed_heads = fixed_heads
         self.fixed_tails = fixed_tails
         self.annotation_types = annotation_types
+        self.target = target
         if redraw:
             self.redraw_annotations()
         self.ignore_input = not allow
@@ -532,11 +534,34 @@ class FigurePanel(ipw.HBox):
             else:
                 points = np.vstack([fh, points, x, ft])
         self.annotations[self.foreground] = points
+        # Anyone who depends on us needs to be potentially redrawn.
+        deps = self.state.config.fixed_deps[self.foreground]
+        for dep in deps:
+            self._recalc_ends(dep)
         # Redraw the annotations.
         if redraw:
-            self.redraw_annotations(background = False)
+            self.redraw_annotations(background = (len(deps) > 0))
             self._increment_annotation_change()
-    
+        
+    def _recalc_ends(self, annot):
+        """Recalculates the fixed head and fixed tail for the point and updates
+        the annotations."""
+        points = self.annotations.get(annot)
+        if points is None or len(points) == 0:
+            return
+        (fh, ft) = self.state._calc_fixed_ends(annot, targ=self.target)
+        stack = []
+        if fh is not None:
+            stack.append(fh)
+        else:
+            stack.append(points[0])
+        stack.append(points[1:-1])
+        if ft is not None:
+            stack.append(ft)
+        else:
+            stack.append(points[-1])
+        points = np.vstack(stack)
+        self.annotations[annot] = points
     
     def push_impoint(self, x, y = None, redraw = True):
         """Push the given image point onto the selected annotation.
@@ -560,6 +585,11 @@ class FigurePanel(ipw.HBox):
         points = self.annotations.get(self.foreground)
         if points is None or len(points) == 0:
             # No points to pop!
+            return None
+        deps = self.state.config.fixed_deps[self.foreground]
+        hasdeps = len(deps) > 0
+        if len(points) == 1 and hasdeps:
+            # Can't pop because something depends on this point!
             return None
         fh = self.fixed_head(self.foreground)
         ft = self.fixed_tail(self.foreground)
@@ -592,9 +622,12 @@ class FigurePanel(ipw.HBox):
                 points = points[:-1]
             points = np.vstack([fh, points, ft])
             self.annotations[self.foreground] = points
+        # Update dependant annotations.
+        for dep in deps:
+            self._recalc_ends(dep)
         # Redraw the annotations.
         if redraw:
-            self.redraw_annotations(background = False)
+            self.redraw_annotations(background = hasdeps)
             self._increment_annotation_change()
 
     

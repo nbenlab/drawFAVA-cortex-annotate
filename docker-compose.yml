@@ -2,11 +2,15 @@ services:
    annotate:
       build: .
       ports:
-         - "8888:${ANNOTATE_PORT}"
+         - "127.0.0.1:${ANNOTATE_PORT:-8888}:${ANNOTATE_PORT:-8888}"
+      environment:
+        NB_UID: "${UID}"
+        CHOWN_HOME: "yes"
+        JUPYTER_TOKEN: ""
+        JUPYTER_PORT: "${ANNOTATE_PORT:-8888}"
+        DOCKER_STACKS_JUPYTER_CMD: "notebook"
       volumes:
          - ${PWD}/save:/save:rw
          - ${PWD}/cache:/cache:rw
          - ${PWD}/config:/config:r
          - ${PWD}:/git:r
-      environment:
-        - DOCKER_STACKS_JUPYTER_CMD=notebook

@@ -627,7 +627,8 @@ class Config:
     
     __slots__ = (
         "config_path", "yaml", "display", "init", "targets", "figures",
-        "annotations", "builtin_annotations", "review", "annotation_types"
+        "annotations", "builtin_annotations", "review", "annotation_types",
+        "fixed_deps"
     )
     
     def __init__(self, config_path = "/config/config.yaml"):
@@ -659,4 +660,13 @@ class Config:
         d = self.annotations.types.copy()
         d.update(self.builtin_annotations.types)
         self.annotation_types = d
-
+        # Figure out the dependencies for all the annotations.
+        alldeps = {}
+        for annot in self.annotations.keys():
+            deps = []
+            for (annot_name, annot_data) in self.annotations.items():
+                for fixed in (annot_data.fixed_head, annot_data.fixed_tail):
+                    if fixed is not None and annot in fixed["requires"]:
+                        deps.append(annot_name)
+            alldeps[annot] = tuple(deps)
+        self.fixed_deps = alldeps
