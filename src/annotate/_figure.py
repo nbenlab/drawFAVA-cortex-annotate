@@ -184,7 +184,7 @@ class FigurePanel(ipw.HBox):
             # Determine if the head or tail of this annotation is fixed.
             fixed_head = self.fixed_heads.get(annotation, None) is not None
             fixed_tail = self.fixed_tails.get(annotation, None) is not None
- 
+
             # Get the style for this annotation.
             style = self.state.style(styletag) 
 
@@ -788,7 +788,8 @@ class FigurePanel(ipw.HBox):
 
         # Redraw the annotations.
         if redraw:
-            self.redraw_annotations(background = has_deps)
+            with ipc.hold_canvas():
+                self.redraw_annotations(background = has_deps)
             self._increment_annotation_change()
 
 
@@ -848,7 +849,8 @@ class FigurePanel(ipw.HBox):
             self.cursor = self.editable[next_index]
 
         # Redraw the annotations to show the new cursor position.
-        self.redraw_annotations(background = False)
+        with ipc.hold_canvas():
+            self.redraw_annotations(background = False)
 
     
     def pop_point(self, redraw = True):
@@ -926,7 +928,8 @@ class FigurePanel(ipw.HBox):
 
         # Redraw the annotations.
         if redraw:
-            self.redraw_annotations(background = has_deps)
+            with ipc.hold_canvas():
+                self.redraw_annotations(background = has_deps)
             self._increment_annotation_change()
    
 

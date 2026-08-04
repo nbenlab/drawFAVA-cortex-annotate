@@ -333,8 +333,8 @@ class AnnotationState:
         # Get the path for this annotation.
         tsv_file = self.target_save_path(target_id, annotation)
 
-        # If there is no file, we return an empty matrix of points.
-        if not op.isfile(tsv_file):
+        # If there is no file or the file is empty, we return an empty matrix of points.
+        if not op.isfile(tsv_file) or op.getsize(tsv_file) == 0:
             return np.zeros((0, 2), dtype = float)
 
         # Read in the coordinates using pandas (tab separated, no header).
